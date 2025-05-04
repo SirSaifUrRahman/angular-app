@@ -1,0 +1,15 @@
+# syntax=docker/dockerfile:1.4
+
+FROM node:18-alpine as builder
+
+WORKDIR /project
+
+RUN npm install -g @angular/cli@13
+
+COPY package*.json ./
+# ci stands for clean install similar to npm install but this is best
+RUN npm install 
+EXPOSE 4200
+COPY . .
+CMD ["ng", "serve", "--host", "0.0.0.0"]
+
