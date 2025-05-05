@@ -1,0 +1,125 @@
+pipeline {
+    agent {
+        label 'habib-node'
+    }
+
+    // Global environment variables
+    environment {
+        GIT_REPO         = 'https://github.com/SirSaifUrRahman/angular-app.git'
+        APP_NAME         = 'angular-app'
+        RELEASE          = '1.0'
+        DOCKER_USER      = 'saif764'
+        DOCKERHUB_LABEL  = 'dockerhub-cred'
+
+        IMAGE_NAME       = "${DOCKER_USER}/${APP_NAME}"
+        IMAGE_TAG        = "${RELEASE}.${BUILD_NUMBER}"      // BUILD_NUMBER is available here
+        CI_BUILD_NUM     = "${BUILD_NUMBER}"                 // Use BUILD_NUMBER directly instead of env.BUILD_NUMBER
+
+        // You must store a secret text credential with ID "JENKINS_API_TOKEN" in Jenkins
+        JENKINS_API_TOKEN = credentials("JENKINS_API_TOKEN") 
+    }
+
+    parameters {
+        string(name: 'BRANCH_NAME', defaultValue: 'main', description: 'Git branch to build')
+        // booleanParam(name: 'RUN_TESTS', defaultValue: true, description: 'Run tests after building the project')
+    }
+
+    stages {
+        stage('Cleanup Workspace') {
+            steps {
+                cleanWs()
+            }
+        }
+
+        stage('Clone Repository') {
+            steps {
+                echo "Cloning ${GIT_REPO} branch: ${params.BRANCH_NAME}"
+                git branch: "${params.BRANCH_NAME}", url: "${GIT_REPO}", credentialsId: 'github'
+                sh "echo Build Number of CI Job is: ${CI_BUILD_NUM}"
+            }
+        }
+
+        // stage("SonarQube: Code Analysis"){
+        //     steps{
+        //         script{
+        //             withSonarQubeEnv(credentialsId: 'sonar-token'){
+        //                 sh "mvn sonar:sonar"
+        //             }
+        //         }
+        //     }
+        // }
+        
+        // stage("SonarQube: Code Quality Gates"){
+        //     steps{
+        //         script{
+        //              waitForQualityGate abortPipeline: false, credentialsId: 'sonar-token'
+        //         }
+        //     }
+        // }
+
+        stage("Build & Push Docker Image") {
+            steps {
+                script {
+                    withCredentials([usernamePassword(
+                        credentialsId: "${DOCKERHUB_LABEL}",
+                        usernameVariable: "DOCKER_USER",
+                        passwordVariable: "DOCKER_PASS"
+                    )]) {
+                        def imageNameWithTag = "${DOCKER_USER}/${APP_NAME}:${IMAGE_TAG}"  // Use DOCKER_USER from credentials
+
+                        // Build image
+                        def dockerImage = docker.build(imageNameWithTag)
+
+                        // Push to DockerHub
+                        docker.withRegistry('https://index.docker.io/v1/', "${DOCKERHUB_LABEL}") {
+                            dockerImage.push("${IMAGE_TAG}")
+                            dockerImage.push("latest")
+                        }
+
+                        echo "Docker image ${imageNameWithTag} pushed successfully."
+                    }
+                }
+            }
+        }
+
+        stage("Trivy Scan") {
+            steps {
+                script {
+                    sh '''
+                        docker run \
+                        -v /var/run/docker.sock:/var/run/docker.sock \
+                        aquasec/trivy image saif764/angular-app:latest \
+                        --no-progress --scanners vuln --exit-code 0 \
+                        --severity HIGH,CRITICAL --format table
+                    '''
+                }
+            }
+        }
+
+        stage("Clean Up Artifacts") {
+            steps {
+                script {
+                    sh "docker rmi ${IMAGE_NAME}:${IMAGE_TAG} || true"
+                    sh "docker rmi ${IMAGE_NAME}:latest || true"
+                }
+            }
+        }
+
+        stage('Triggering CD Job') {
+            steps {
+                 script {
+                    def pipelineJob = build job: 'angular-app-cd', wait: true, propagate: true, parameters: [
+                            string(name: 'APP_NAME', value: "${APP_NAME}"),
+                            string(name: 'RELEASE', value: "${RELEASE}"),
+                            string(name: 'DOCKER_USER', value: "${DOCKER_USER}"),
+                            string(name: 'IMAGE_NAME', value: "${IMAGE_NAME}"),
+                            string(name: 'IMAGE_TAG', value: "${IMAGE_TAG}"),
+                            string(name: 'CI_BUILD_NUM', value: "${CI_BUILD_NUM}")
+                        ]
+                    echo "CD job completed with result: ${pipelineJob.result}"
+                }
+            }
+        }
+    }
+}
+

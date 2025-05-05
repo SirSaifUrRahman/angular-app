@@ -1,0 +1,283 @@
+pipeline {
+    agent { label "habib-node" }
+
+    // Importing parameters as environment variables
+     parameters {
+        string(name: 'APP_NAME', defaultValue: 'angular-app', description: 'Application name')
+        string(name: 'RELEASE', defaultValue: '1.0', description: 'Release version')
+        string(name: 'DOCKER_USER', defaultValue: 'saif764', description: 'Docker Hub username')
+        string(name: 'IMAGE_NAME', defaultValue: '', description: 'Full image name')
+        string(name: 'IMAGE_TAG', defaultValue: '', description: 'Image tag')
+        string(name: 'CI_BUILD_NUM', defaultValue: '', description: 'Build number from CI pipeline')
+    }
+
+    environment {
+        APP_NAME     = "${params.APP_NAME}"
+        RELEASE      = "${params.RELEASE}"
+        DOCKER_USER  = "${params.DOCKER_USER}"
+        IMAGE_NAME   = "${params.IMAGE_NAME}"
+        IMAGE_TAG    = "${params.IMAGE_TAG}"
+        CI_BUILD_NUM = "${params.CI_BUILD_NUM}"
+    }
+
+    stages {
+        stage("Cleanup Workspace") {
+            steps {
+                cleanWs()
+            }
+        }
+
+        stage("Checkout from SCM") {
+            steps {
+                git branch: 'main', credentialsId: 'github', url: 'https://github.com/SirSaifUrRahman/angular-app.git'
+            }
+        }
+
+        stage("Update the Deployment Tags") {
+            steps {
+                
+                sh """
+                    echo "DOCKER_USER=${DOCKER_USER}"
+                    echo "APP_NAME=${APP_NAME}"
+                    echo "IMAGE_TAG=${IMAGE_TAG}"
+
+                    echo "Before Update:"
+                    cat ./angular-k8s/deployment_angular.yml
+
+                    if [ ! -f ./angular-k8s/deployment_angular.yml ]; then
+                        echo "ERROR: File not found!"
+                        exit 1
+                    fi
+
+                    sed -i "s|^\\(\\s*image:\\s*\\)${DOCKER_USER}/${APP_NAME}:.*|\\1${DOCKER_USER}/${APP_NAME}:${IMAGE_TAG}|" ./angular-k8s/deployment_angular.yml
+
+                    echo "After Update:"
+                    cat ./angular-k8s/deployment_angular.yml
+                """
+            }
+        }
+
+        // Optional stage to push changes to GitHub (version 1)
+        // stage("Push the changed deployment file to Git") {
+        //     steps {
+        //         withCredentials([usernamePassword(
+        //             credentialsId: 'github',
+        //             usernameVariable: 'GIT_USER',
+        //             passwordVariable: 'GIT_TOKEN'
+        //         )]) {
+        //             withEnv(["GIT_PUSH_URL=https://${GIT_USER}:${GIT_TOKEN}@github.com/SirSaifUrRahman/angular-app.git"]) {
+        //                 sh '''
+        //                     git config user.name "$GIT_USER"
+        //                     git config user.email "ssaifurrahman21@gmail.com"
+
+        //                     echo "Checking repository status: "
+        //                     git status
+
+        //                     echo "Adding changes to git: "
+        //                     git add .
+
+        //                     echo "Committing changes: "
+        //                     git commit -m "Updated Deployment Manifest" || echo "Nothing to commit"
+
+        //                     echo "Pushing changes to GitHub: "
+        //                     git push "$GIT_PUSH_URL" main
+        //                 '''
+        //             }
+        //         }
+        //     }
+        // }
+
+        // Active stage to push changes to GitHub (version 2)
+        stage("Push the changed deployment file to Git") {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: 'github',
+                    usernameVariable: 'GIT_USER',
+                    passwordVariable: 'GIT_TOKEN'
+                )]) {
+                    sh '''
+                        git config user.name "$GIT_USER"
+                        git config user.email "ssaifurrahman21@gmail.com"
+                        git remote set-url origin https://$GIT_USER:$GIT_TOKEN@github.com/SirSaifUrRahman/angular-app.git
+
+                        echo "Checking repository status: "
+                        git status
+
+                        echo "Adding changes to git: "
+                        git add .
+
+                        echo "Committing changes: "
+                        git commit -m "Updated Deployment Manifest" || echo "Nothing to commit"
+
+                        echo "Pushing changes to GitHub: "
+                        git push origin main
+                    '''
+                }
+            }
+        }
+    }
+    post {
+        success {
+            script {
+                emailext attachLog: true,
+                from: 'ssaifurrahman21@gmail.com',
+                subject: "✅ Register Application has been updated and deployed - '${currentBuild.result}'",
+                body: """
+                    <html>
+                        <head>
+                            <style>
+                                body {
+                                    font-family: 'Segoe UI', Tahoma, sans-serif;
+                                    background: linear-gradient(145deg, #eef2f3, #ffffff);
+                                    padding: 20px;
+                                    margin: 0;
+                                }
+                                .container {
+                                    max-width: 640px;
+                                    margin: auto;
+                                    animation: fadeInUp 0.5s ease;
+                                }
+                                .card {
+                                    background: #ffffff;
+                                    border-left: 6px solid;
+                                    border-image: linear-gradient(to bottom, #4CAF50, #81C784) 1;
+                                    margin-bottom: 20px;
+                                    padding: 20px;
+                                    border-radius: 12px;
+                                    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.1);
+                                    transition: transform 0.3s, box-shadow 0.3s;
+                                }
+                                .card:hover {
+                                    transform: translateY(-4px);
+                                    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.15);
+                                }
+                                .header {
+                                    font-size: 18px;
+                                    font-weight: 600;
+                                    color: #2e7d32;
+                                    margin-bottom: 8px;
+                                }
+                                .content {
+                                    font-size: 15px;
+                                    color: #37474f;
+                                }
+                                .link a {
+                                    color: #1565c0;
+                                    text-decoration: none;
+                                    font-weight: bold;
+                                }
+                                .link a:hover {
+                                    text-decoration: underline;
+                                }
+                                @keyframes fadeInUp {
+                                    from {
+                                        opacity: 0;
+                                        transform: translateY(20px);
+                                    }
+                                    to {
+                                        opacity: 1;
+                                        transform: translateY(0);
+                                    }
+                                }
+                            </style>
+                        </head>
+                        <body>
+                            <div class="container">
+                                <div class="card">
+                                    <div class="header">✅ Project</div>
+                                    <div class="content">${env.JOB_NAME}</div>
+                                </div>
+                                <div class="card">
+                                    <div class="header">📦 Build Number (CD Job)</div>
+                                    <div class="content">${env.BUILD_NUMBER}</div>
+                                </div>
+                                <div class="card">
+                                    <div class="header">🔄 Build Number (CI Job)</div>
+                                    <div class="content">${CI_BUILD_NUM}</div>
+                                </div>
+                                <div class="card link">
+                                    <div class="header">🔗 Build URL</div>
+                                    <div class="content"><a href="${env.BUILD_URL}">${env.BUILD_URL}</a></div>
+                                </div>
+                            </div>
+                        </body>
+                    </html>
+                """,
+                to: 'ssaifurrahman21@gmail.com',
+                mimeType: 'text/html'
+            }
+        }
+
+        failure {
+            script {
+                emailext attachLog: true,
+                from: 'ssaifurrahman21@gmail.com',
+                subject: "Register Application build failed - '${currentBuild.result}'",
+                body: """
+                    <html>
+                        <head>
+                            <style>
+                                body {
+                                    font-family: 'Segoe UI', Tahoma, sans-serif;
+                                    background: linear-gradient(to right, #fce4ec, #f8bbd0);
+                                    padding: 20px;
+                                }
+                                .container {
+                                    max-width: 600px;
+                                    margin: auto;
+                                    animation: fadeInDrop 0.6s ease-out;
+                                }
+                                .card {
+                                    background: #fff0f0;
+                                    border-left: 6px solid;
+                                    border-image: linear-gradient(to bottom, #e53935, #ef5350) 1;
+                                    padding: 20px;
+                                    margin-bottom: 20px;
+                                    border-radius: 12px;
+                                    box-shadow: 0 3px 12px rgba(0,0,0,0.1);
+                                }
+                                .header {
+                                    font-size: 18px;
+                                    font-weight: bold;
+                                    color: #c62828;
+                                    margin-bottom: 8px;
+                                }
+                                .content {
+                                    font-size: 15px;
+                                    color: #6e2c2c;
+                                }
+                                @keyframes fadeInDrop {
+                                    from {
+                                        opacity: 0;
+                                        transform: translateY(-10px) scale(0.95);
+                                    }
+                                    to {
+                                        opacity: 1;
+                                        transform: translateY(0) scale(1);
+                                    }
+                                }
+                            </style>
+                        </head>
+                        <body>
+                            <div class="container">
+                                <div class="card">
+                                    <div class="header">❌ Project</div>
+                                    <div class="content">${env.JOB_NAME}</div>
+                                </div>
+                                <div class="card">
+                                    <div class="header">🚫 Build Number</div>
+                                    <div class="content">${env.BUILD_NUMBER}</div>
+                                </div>
+                            </div>
+                        </body>
+                    </html>
+                """,
+                to: 'ssaifurrahman21@gmail.com',
+                mimeType: 'text/html'
+            }
+        }
+    }
+
+}
+
+
