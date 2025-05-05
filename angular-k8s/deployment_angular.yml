@@ -26,7 +26,7 @@ spec:
           # - Each init container must complete successfully before the next one starts.
       containers:
       - name:  angular-container
-        image:  saif764/angular-app:latest
+        image:  saif764/angular-app:1.0.3
         resources:
           requests:
             cpu: 100m
